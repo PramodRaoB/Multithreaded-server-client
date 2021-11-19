@@ -9,6 +9,12 @@
 /////////////////////////////
 #include <iostream>
 #include <tuple>
+#include <cassert>
+#include <queue>
+#include <map>
+#include <sstream>
+#include "globals.h"
+
 using namespace std;
 /////////////////////////////
 
@@ -28,15 +34,24 @@ typedef long long LL;
 #define debug(x) cout << #x << " : " << (x) << endl
 #define part cout << "-----------------------------------" << endl;
 
-///////////////////////////////
 #define MAX_CLIENTS 4
 #define PORT_ARG 8001
 
 const int initial_msg_len = 256;
 
-////////////////////////////////////
-
 const LL buff_sz = 1048576;
+pthread_mutex_t qLock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t requestCV = PTHREAD_COND_INITIALIZER;
+int requestCount = 0;
+typedef struct request {
+    int clientFd;
+    int index;
+    string req;
+} Request;
+queue<Request> requestQ;
+pthread_mutex_t *keyLocks;
+#define MAX_KEY 100
+
 ///////////////////////////////////////////////////
 pair<string, int> read_string_from_socket(const int &fd, int bytes)
 {
@@ -70,65 +85,170 @@ int send_string_on_socket(int fd, const string &s)
 
 ///////////////////////////////
 
-void handle_connection(int client_socket_fd)
-{
-    // int client_socket_fd = *((int *)client_socket_fd_ptr);
-    //####################################################
-
-    int received_num, sent_num;
-
-    /* read message from client */
-    int ret_val = 1;
-
-    while (true)
-    {
-        string cmd;
-        tie(cmd, received_num) = read_string_from_socket(client_socket_fd, buff_sz);
-        ret_val = received_num;
-        // debug(ret_val);
-        // printf("Read something\n");
-        if (ret_val <= 0)
-        {
-            // perror("Error read()");
-            printf("Server could not read msg sent from client\n");
-            goto close_client_socket_ceremony;
-        }
-        cout << "Client sent : " << cmd << endl;
-        if (cmd == "exit")
-        {
-            cout << "Exit pressed by client" << endl;
-            goto close_client_socket_ceremony;
-        }
-        string msg_to_send_back = "Ack: " + cmd;
-
-        ////////////////////////////////////////
-        // "If the server write a message on the socket and then close it before the client's read. Will the client be able to read the message?"
-        // Yes. The client will get the data that was sent before the FIN packet that closes the socket.
-
-        int sent_to_client = send_string_on_socket(client_socket_fd, msg_to_send_back);
-        // debug(sent_to_client);
-        if (sent_to_client == -1)
-        {
-            perror("Error while writing to client. Seems socket has been closed");
-            goto close_client_socket_ceremony;
-        }
-    }
-
-close_client_socket_ceremony:
-    close(client_socket_fd);
-    printf(BRED "Disconnected from client" ANSI_RESET "\n");
-    // return NULL;
+void handle_connection(int client_socket_fd) {
+    Request newReq;
+    newReq.clientFd = client_socket_fd;
+    newReq.index = requestCount++;
+    pthread_mutex_lock(&qLock);
+    requestQ.push(newReq);
+    pthread_cond_signal(&requestCV);
+    pthread_mutex_unlock(&qLock);
 }
 
-int main(int argc, char *argv[])
-{
+map<string, int> requestArg;
 
-    int i, j, k, t, n;
+[[noreturn]] void *service_client(void *input) {
+    int ind = *((int *)input);
+    while (true) {
+        pthread_mutex_lock(&qLock);
+        while (requestQ.empty())
+            pthread_cond_wait(&requestCV, &qLock);
+        Request currReq = requestQ.front();
+        requestQ.pop();
+        pthread_mutex_unlock(&qLock);
+        string cmd;
+        int received_num;
+        tie(cmd, received_num) = read_string_from_socket(currReq.clientFd, buff_sz);
+        int ret_val = received_num;
+        // debug(ret_val);
+        // printf("Read something\n");
+        if (ret_val <= 0) {
+            // perror("Error read()");
+            printf("Server could not read msg sent from client\n");
+            close(currReq.clientFd);
+            printf(BRED "Disconnected from client" ANSI_RESET "\n");
+            continue;
+        }
+        cout << "here" << endl;
+        cout << "Client sent : " << cmd << endl;
+        currReq.req = cmd;
+        string to_send;
+        istringstream iss(currReq.req);
+        vector<string> args;
+        string temp;
+        to_send += to_string(currReq.index) + ":" + to_string(ind) + ":";
+        while (iss >> temp) {
+            args.push_back(temp);
+        }
+        if (args.empty() || requestArg.find(args[0]) == requestArg.end() || requestArg[args[0]] != args.size()) {
+            cout << "Invalid request\n";
+        }
+        if (args[0] == "insert") {
+            int k = stoi(args[1]);
+            if (k > 100 || k < 0) {
+                cerr << "Invalid request\n";
+            }
+            else if (serverDictionary.find(k) != serverDictionary.end()) {
+                to_send += "Key already exists";
+            }
+            else {
+                pthread_mutex_lock(&keyLocks[k]);
+                serverDictionary[k] = args[2];
+                pthread_mutex_unlock(&keyLocks[k]);
+                to_send += "Insertion successful";
+            }
+        }
+        else if (args[0] == "delete") {
+            int k = stoi(args[1]);
+            if (k > 100 | k < 0) {
+                to_send += "Key out of bounds";
+            }
+            else if (serverDictionary.find(k) == serverDictionary.end()) {
+                to_send += "No such key exists";
+            }
+            else {
+                pthread_mutex_lock(&keyLocks[k]);
+                serverDictionary.erase(k);
+                pthread_mutex_unlock(&keyLocks[k]);
+                to_send += "Deletion successful";
+            }
+        }
+        else if (args[0] == "update") {
+            int k = stoi(args[1]);
+            if (k > 100 || k < 0) {
+                cerr << "Invalid request\n";
+            }
+            else if (serverDictionary.find(k) == serverDictionary.end()) {
+                to_send += "No such key exists";
+            }
+            else {
+                pthread_mutex_lock(&keyLocks[k]);
+                serverDictionary[k] = args[2];
+                pthread_mutex_unlock(&keyLocks[k]);
+                to_send += args[2];
+            }
+        }
+        else if (args[0] == "concat") {
+            int k1 = stoi(args[1]), k2 = stoi(args[2]);
+            if (k1 > 100 || k1 < 0 || k2 > 100 || k2 < 0) {
+                cerr << "Invalid request\n";
+            }
+            else if (serverDictionary.find(k1) == serverDictionary.end() || serverDictionary.find(k2) == serverDictionary.end()) {
+                to_send += "Concat failed as at least one of the keys does not exist";
+            }
+            else {
+                pthread_mutex_lock(&keyLocks[min(k1, k2)]);
+                pthread_mutex_lock(&keyLocks[max(k1, k2)]);
+                string val = serverDictionary[k1];
+                serverDictionary[k1] += serverDictionary[k2];
+                serverDictionary[k2] += val;
+                to_send += serverDictionary[k2];
+                pthread_mutex_unlock(&keyLocks[max(k1, k2)]);
+                pthread_mutex_unlock(&keyLocks[min(k1, k2)]);
+            }
+        }
+        else if (args[0] == "fetch") {
+            int k = stoi(args[1]);
+            if (k > 100 | k < 0) {
+                to_send += "Key out of bounds";
+            }
+            else if (serverDictionary.find(k) == serverDictionary.end()) {
+                to_send += "No such key exists";
+            }
+            else {
+                pthread_mutex_lock(&keyLocks[k]);
+                to_send += serverDictionary[k];
+                pthread_mutex_unlock(&keyLocks[k]);
+            }
+        }
+        else {
+            to_send += "Invalid request";
+        }
 
+        int sent_to_client = send_string_on_socket(currReq.clientFd, to_send);
+        // debug(sent_to_client);
+        if (sent_to_client == -1) {
+            perror("Error while writing to client. Seems socket has been closed");
+        }
+        close(currReq.clientFd);
+        printf(BRED "Disconnected from client" ANSI_RESET "\n");
+    }
+}
+
+int main(int argc, char *argv[]) {
+    if (argc <= 1) {
+        cerr << "Error: Missing worker thread argument\n";
+        cerr << "Usage: ./server [N]\n";
+        return 0;
+    }
+    else if (argc > 2) {
+        cerr << "Error: Too many arguments\n";
+        return 0;
+    }
+    requestArg["insert"] = 3;
+    requestArg["delete"] = 2;
+    requestArg["update"] = 3;
+    requestArg["concat"] = 2;
+    requestArg["fetch"] = 2;
+    keyLocks = (pthread_mutex_t *) malloc((MAX_KEY + 1) * sizeof(pthread_mutex_t));
+    assert(keyLocks);
+    for (int i = 0; i <= MAX_KEY; i++) {
+        keyLocks[i] = PTHREAD_MUTEX_INITIALIZER;
+    }
     int wel_socket_fd, client_socket_fd, port_number;
     socklen_t clilen;
 
-    struct sockaddr_in serv_addr_obj, client_addr_obj;
+    struct sockaddr_in serv_addr_obj{}, client_addr_obj{};
     /////////////////////////////////////////////////////////////////////////
     /* create socket */
     /*
@@ -171,14 +291,21 @@ int main(int argc, char *argv[])
     }
     //////////////////////////////////////////////////////////////////////////////////////
 
+    int numWorkers = atoi(argv[1]);
+    pthread_t *workers = (pthread_t *) malloc(numWorkers * sizeof(pthread_t));
+    assert(workers);
+    for (int i = 0; i < numWorkers; i++) {
+        int rc = pthread_create(&workers[i], NULL, service_client, &i);
+        assert(rc == 0);
+    }
+
     /* listen for incoming connection requests */
 
     listen(wel_socket_fd, MAX_CLIENTS);
     cout << "Server has started listening on the LISTEN PORT" << endl;
     clilen = sizeof(client_addr_obj);
 
-    while (true)
-    {
+    while (true) {
         /* accept a new request, create a client_socket_fd */
         /*
         During the three-way handshake, the client process knocks on the welcoming door
@@ -188,8 +315,7 @@ more precisely, a new socket that is dedicated to that particular client.
         //accept is a blocking call
         printf("Waiting for a new client to request for a connection\n");
         client_socket_fd = accept(wel_socket_fd, (struct sockaddr *)&client_addr_obj, &clilen);
-        if (client_socket_fd < 0)
-        {
+        if (client_socket_fd < 0) {
             perror("ERROR while accept() system call occurred in SERVER");
             exit(-1);
         }

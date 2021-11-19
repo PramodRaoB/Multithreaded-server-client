@@ -121,35 +121,39 @@ int get_socket_fd(struct sockaddr_in *ptr)
     // part;
     return socket_fd;
 }
-////////////////////////////////////////////////////////
 
-[[noreturn]] void begin_process()
-{
-    struct sockaddr_in server_obj;
+void *client_request(void *) {
+    int waitTime;
+    string request;
+    cin >> waitTime;
+    getline(cin, request);
+    sleep(waitTime);
+    struct sockaddr_in server_obj{};
     int socket_fd = get_socket_fd(&server_obj);
-
-
     cout << "Connection to server successful" << endl;
 
-    while (true)
-    {
-        string to_send;
-        cout << "Enter msg: ";
-        getline(cin, to_send);
-        send_string_on_socket(socket_fd, to_send);
-        int num_bytes_read;
-        string output_msg;
-        tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
-        cout << "Received: " << output_msg << endl;
-        cout << "====" << endl;
-    }
-    // part;
+    send_string_on_socket(socket_fd, request);
+    int num_bytes_read;
+    string output_msg;
+    tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
+    cout << "Received: " << output_msg << endl;
+    cout << "====" << endl;
+    return NULL;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
+    int numRequests;
+    cin >> numRequests;
 
-    int i, j, k, t, n;
-    begin_process();
+//    pthread_t *clientThreads = (pthread_t *) malloc(numRequests * sizeof(pthread_t));
+//    assert(clientThreads);
+    pthread_t *clients = (pthread_t *) malloc(numRequests * sizeof(pthread_t));
+    assert(clients);
+
+    for (int i = 0; i < numRequests; i++) {
+        pthread_create(&clients[i], NULL, client_request, NULL);
+    }
+    for (int i = 0; i < numRequests; i++)
+        pthread_join(clients[i], NULL);
     return 0;
 }
