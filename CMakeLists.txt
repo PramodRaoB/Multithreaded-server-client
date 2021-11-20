@@ -8,5 +8,5 @@ include_directories(.)
 
 add_executable(Multithreaded_server_client
         server.cpp
-        server.h)
-#        server.h client.cpp client.h globals.h)
+#        server.h)
+        server.h client.cpp client.h globals.h)

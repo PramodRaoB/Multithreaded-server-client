@@ -20,6 +20,8 @@
 #include <queue>
 #include <vector>
 #include <tuple>
+#include <sstream>
+
 using namespace std;
 /////////////////////////////
 
@@ -122,17 +124,27 @@ int get_socket_fd(struct sockaddr_in *ptr)
     return socket_fd;
 }
 
-void *client_request(void *) {
-    int waitTime;
-    string request;
-    cin >> waitTime;
-    getline(cin, request);
+void *client_request(void *args) {
+    vector<string> request = *((vector<string> *) args);
+    if (request.empty()) {
+        cerr << "Invalid request\n";
+        return NULL;
+    }
+    int waitTime = stoi(request[0]);
     sleep(waitTime);
+    string to_send;
+    for (int i = 1; i < request.size(); i++)
+        to_send += request[i] + " ";
+    if (to_send.empty()) {
+        cerr << "Invalid request\n";
+        return NULL;
+    }
+    cout << "tosend:" << to_send << "\n";
     struct sockaddr_in server_obj{};
     int socket_fd = get_socket_fd(&server_obj);
     cout << "Connection to server successful" << endl;
 
-    send_string_on_socket(socket_fd, request);
+    send_string_on_socket(socket_fd, to_send);
     int num_bytes_read;
     string output_msg;
     tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
@@ -149,9 +161,26 @@ int main(int argc, char *argv[]) {
 //    assert(clientThreads);
     pthread_t *clients = (pthread_t *) malloc(numRequests * sizeof(pthread_t));
     assert(clients);
+    string clearNewline;
+    getline(cin, clearNewline);
+    vector<vector<string>> args(numRequests);
+    for (int i = 0; i < numRequests; i++) {
+        string temp;
+        getline(cin, temp);
+        if (temp.empty()) {
+            cerr << "Failed to read\n";
+            continue;
+        }
+        istringstream iss(temp);
+        string word;
+        while (iss >> word) {
+            if (!word.empty())
+                args[i].push_back(word);
+        }
+    }
 
     for (int i = 0; i < numRequests; i++) {
-        pthread_create(&clients[i], NULL, client_request, NULL);
+        pthread_create(&clients[i], NULL, client_request, (void *) &args[i]);
     }
     for (int i = 0; i < numRequests; i++)
         pthread_join(clients[i], NULL);

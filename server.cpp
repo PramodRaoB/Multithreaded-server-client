@@ -108,10 +108,13 @@ map<string, int> requestArg;
         pthread_mutex_unlock(&qLock);
         string cmd;
         int received_num;
+        cout << "im awake2\n";
+        cout << currReq.clientFd << "\n";
         tie(cmd, received_num) = read_string_from_socket(currReq.clientFd, buff_sz);
         int ret_val = received_num;
         // debug(ret_val);
         // printf("Read something\n");
+        cout << "im awake\n";
         if (ret_val <= 0) {
             // perror("Error read()");
             printf("Server could not read msg sent from client\n");
@@ -130,89 +133,79 @@ map<string, int> requestArg;
         while (iss >> temp) {
             args.push_back(temp);
         }
+        for (auto &i: args) cout << i << "|";
+        cout << "\n";
         if (args.empty() || requestArg.find(args[0]) == requestArg.end() || requestArg[args[0]] != args.size()) {
             cout << "Invalid request\n";
         }
-        if (args[0] == "insert") {
-            int k = stoi(args[1]);
-            if (k > 100 || k < 0) {
-                cerr << "Invalid request\n";
-            }
-            else if (serverDictionary.find(k) != serverDictionary.end()) {
-                to_send += "Key already exists";
-            }
-            else {
-                pthread_mutex_lock(&keyLocks[k]);
-                serverDictionary[k] = args[2];
-                pthread_mutex_unlock(&keyLocks[k]);
-                to_send += "Insertion successful";
-            }
-        }
-        else if (args[0] == "delete") {
-            int k = stoi(args[1]);
-            if (k > 100 | k < 0) {
-                to_send += "Key out of bounds";
-            }
-            else if (serverDictionary.find(k) == serverDictionary.end()) {
-                to_send += "No such key exists";
-            }
-            else {
-                pthread_mutex_lock(&keyLocks[k]);
-                serverDictionary.erase(k);
-                pthread_mutex_unlock(&keyLocks[k]);
-                to_send += "Deletion successful";
-            }
-        }
-        else if (args[0] == "update") {
-            int k = stoi(args[1]);
-            if (k > 100 || k < 0) {
-                cerr << "Invalid request\n";
-            }
-            else if (serverDictionary.find(k) == serverDictionary.end()) {
-                to_send += "No such key exists";
-            }
-            else {
-                pthread_mutex_lock(&keyLocks[k]);
-                serverDictionary[k] = args[2];
-                pthread_mutex_unlock(&keyLocks[k]);
-                to_send += args[2];
-            }
-        }
-        else if (args[0] == "concat") {
-            int k1 = stoi(args[1]), k2 = stoi(args[2]);
-            if (k1 > 100 || k1 < 0 || k2 > 100 || k2 < 0) {
-                cerr << "Invalid request\n";
-            }
-            else if (serverDictionary.find(k1) == serverDictionary.end() || serverDictionary.find(k2) == serverDictionary.end()) {
-                to_send += "Concat failed as at least one of the keys does not exist";
-            }
-            else {
-                pthread_mutex_lock(&keyLocks[min(k1, k2)]);
-                pthread_mutex_lock(&keyLocks[max(k1, k2)]);
-                string val = serverDictionary[k1];
-                serverDictionary[k1] += serverDictionary[k2];
-                serverDictionary[k2] += val;
-                to_send += serverDictionary[k2];
-                pthread_mutex_unlock(&keyLocks[max(k1, k2)]);
-                pthread_mutex_unlock(&keyLocks[min(k1, k2)]);
-            }
-        }
-        else if (args[0] == "fetch") {
-            int k = stoi(args[1]);
-            if (k > 100 | k < 0) {
-                to_send += "Key out of bounds";
-            }
-            else if (serverDictionary.find(k) == serverDictionary.end()) {
-                to_send += "No such key exists";
-            }
-            else {
-                pthread_mutex_lock(&keyLocks[k]);
-                to_send += serverDictionary[k];
-                pthread_mutex_unlock(&keyLocks[k]);
-            }
-        }
         else {
-            to_send += "Invalid request";
+            if (args[0] == "insert") {
+                int k = stoi(args[1]);
+                if (k > 100 || k < 0) {
+                    cerr << "Invalid request\n";
+                } else if (serverDictionary.find(k) != serverDictionary.end()) {
+                    to_send += "Key already exists";
+                } else {
+                    pthread_mutex_lock(&keyLocks[k]);
+                    serverDictionary[k] = args[2];
+                    pthread_mutex_unlock(&keyLocks[k]);
+                    to_send += "Insertion successful";
+                }
+            } else if (args[0] == "delete") {
+                int k = stoi(args[1]);
+                if (k > 100 | k < 0) {
+                    to_send += "Key out of bounds";
+                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                    to_send += "No such key exists";
+                } else {
+                    pthread_mutex_lock(&keyLocks[k]);
+                    serverDictionary.erase(k);
+                    pthread_mutex_unlock(&keyLocks[k]);
+                    to_send += "Deletion successful";
+                }
+            } else if (args[0] == "update") {
+                int k = stoi(args[1]);
+                if (k > 100 || k < 0) {
+                    cerr << "Invalid request\n";
+                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                    to_send += "No such key exists";
+                } else {
+                    pthread_mutex_lock(&keyLocks[k]);
+                    serverDictionary[k] = args[2];
+                    pthread_mutex_unlock(&keyLocks[k]);
+                    to_send += args[2];
+                }
+            } else if (args[0] == "concat") {
+                int k1 = stoi(args[1]), k2 = stoi(args[2]);
+                if (k1 > 100 || k1 < 0 || k2 > 100 || k2 < 0) {
+                    cerr << "Invalid request\n";
+                } else if (serverDictionary.find(k1) == serverDictionary.end() ||
+                           serverDictionary.find(k2) == serverDictionary.end()) {
+                    to_send += "Concat failed as at least one of the keys does not exist";
+                } else {
+                    pthread_mutex_lock(&keyLocks[min(k1, k2)]);
+                    pthread_mutex_lock(&keyLocks[max(k1, k2)]);
+                    string val = serverDictionary[k1];
+                    serverDictionary[k1] += serverDictionary[k2];
+                    serverDictionary[k2] += val;
+                    to_send += serverDictionary[k2];
+                    pthread_mutex_unlock(&keyLocks[max(k1, k2)]);
+                    pthread_mutex_unlock(&keyLocks[min(k1, k2)]);
+                }
+            } else if (args[0] == "fetch") {
+                int k = stoi(args[1]);
+                if (k > 100 | k < 0) {
+                    to_send += "Key out of bounds";
+                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                    to_send += "No such key exists";
+                } else {
+                    pthread_mutex_lock(&keyLocks[k]);
+                    to_send += serverDictionary[k];
+                    pthread_mutex_unlock(&keyLocks[k]);
+                }
+            } else {
+                to_send += "Invalid request";
+            }
         }
 
         int sent_to_client = send_string_on_socket(currReq.clientFd, to_send);
@@ -238,7 +231,7 @@ int main(int argc, char *argv[]) {
     requestArg["insert"] = 3;
     requestArg["delete"] = 2;
     requestArg["update"] = 3;
-    requestArg["concat"] = 2;
+    requestArg["concat"] = 3;
     requestArg["fetch"] = 2;
     keyLocks = (pthread_mutex_t *) malloc((MAX_KEY + 1) * sizeof(pthread_mutex_t));
     assert(keyLocks);
