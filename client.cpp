@@ -31,6 +31,8 @@ typedef long long LL;
 #define SERVER_PORT 8001
 const LL buff_sz = 1048576;
 
+pthread_mutex_t ioLock = PTHREAD_MUTEX_INITIALIZER;
+
 pair<string, int> read_string_from_socket(int fd, int bytes) {
     std::string output;
     output.resize(bytes);
@@ -112,7 +114,9 @@ void *client_request(void *args) {
     string output_msg;
     tie(output_msg, num_bytes_read) = read_string_from_socket(socket_fd, buff_sz);
 //    cout << "Received: " << output_msg << endl;
+    pthread_mutex_lock(&ioLock);
     cout << output_msg << endl;
+    pthread_mutex_unlock(&ioLock);
 //    cout << "====" << endl;
     return nullptr;
 }

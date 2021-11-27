@@ -99,7 +99,8 @@ map<string, int> requestArg;
         istringstream iss(cmd);
         vector<string> args;
         string temp;
-        to_send += to_string(currReq.index) + ":" + to_string(ind) + ":";
+//        to_send += to_string(currReq.index) + ":" + to_string(ind) + ":";
+        to_send += to_string(currReq.index) + ":" + to_string(gettid()) + ":";
         while (iss >> temp) {
             args.push_back(temp);
         }
@@ -176,6 +177,7 @@ map<string, int> requestArg;
             }
         }
 
+        sleep(2);
         size_t sent_to_client = send_string_on_socket(currReq.clientFd, to_send);
         if (sent_to_client == -1) {
             perror("Error while writing to client. Seems socket has been closed");
