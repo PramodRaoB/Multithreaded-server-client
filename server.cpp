@@ -100,7 +100,7 @@ map<string, int> requestArg;
         vector<string> args;
         string temp;
 //        to_send += to_string(currReq.index) + ":" + to_string(ind) + ":";
-        to_send += to_string(currReq.index) + ":" + to_string(gettid()) + ":";
+        to_send += to_string(currReq.index) + ":" + to_string(pthread_self()) + ":";
         while (iss >> temp) {
             args.push_back(temp);
         }
@@ -112,11 +112,12 @@ map<string, int> requestArg;
                 int k = stoi(args[1]);
                 if (k > 100 || k < 0) {
                     cerr << "Invalid request\n";
-                } else if (serverDictionary.find(k) != serverDictionary.end()) {
+                } else if (present[k]) {
                     to_send += "Key already exists";
                 } else {
                     pthread_mutex_lock(&keyLocks[k]);
                     serverDictionary[k] = args[2];
+                    present[k] = 1;
                     pthread_mutex_unlock(&keyLocks[k]);
                     to_send += "Insertion successful";
                 }
@@ -124,11 +125,11 @@ map<string, int> requestArg;
                 int k = stoi(args[1]);
                 if (k > 100 | k < 0) {
                     to_send += "Key out of bounds";
-                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                } else if (!present[k]) {
                     to_send += "No such key exists";
                 } else {
                     pthread_mutex_lock(&keyLocks[k]);
-                    serverDictionary.erase(k);
+                    present[k] = 0;
                     pthread_mutex_unlock(&keyLocks[k]);
                     to_send += "Deletion successful";
                 }
@@ -136,11 +137,12 @@ map<string, int> requestArg;
                 int k = stoi(args[1]);
                 if (k > 100 || k < 0) {
                     cerr << "Invalid request\n";
-                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                } else if (!present[k]) {
                     to_send += "No such key exists";
                 } else {
                     pthread_mutex_lock(&keyLocks[k]);
                     serverDictionary[k] = args[2];
+                    present[k] = 1;
                     pthread_mutex_unlock(&keyLocks[k]);
                     to_send += args[2];
                 }
@@ -148,8 +150,7 @@ map<string, int> requestArg;
                 int k1 = stoi(args[1]), k2 = stoi(args[2]);
                 if (k1 > 100 || k1 < 0 || k2 > 100 || k2 < 0) {
                     cerr << "Invalid request\n";
-                } else if (serverDictionary.find(k1) == serverDictionary.end() ||
-                           serverDictionary.find(k2) == serverDictionary.end()) {
+                } else if (!present[k1] || !present[k2]) {
                     to_send += "Concat failed as at least one of the keys does not exist";
                 } else {
                     pthread_mutex_lock(&keyLocks[min(k1, k2)]);
@@ -158,6 +159,7 @@ map<string, int> requestArg;
                     serverDictionary[k1] += serverDictionary[k2];
                     serverDictionary[k2] += val;
                     to_send += serverDictionary[k2];
+                    present[k1] = present[k2] = 1;
                     pthread_mutex_unlock(&keyLocks[max(k1, k2)]);
                     pthread_mutex_unlock(&keyLocks[min(k1, k2)]);
                 }
@@ -165,11 +167,12 @@ map<string, int> requestArg;
                 int k = stoi(args[1]);
                 if (k > 100 | k < 0) {
                     to_send += "Key out of bounds";
-                } else if (serverDictionary.find(k) == serverDictionary.end()) {
+                } else if (!present[k]) {
                     to_send += "No such key exists";
                 } else {
                     pthread_mutex_lock(&keyLocks[k]);
                     to_send += serverDictionary[k];
+                    present[k] = 1;
                     pthread_mutex_unlock(&keyLocks[k]);
                 }
             } else {
@@ -203,6 +206,9 @@ int main(int argc, char *argv[]) {
     requestArg["update"] = 3;
     requestArg["concat"] = 3;
     requestArg["fetch"] = 2;
+
+    serverDictionary.assign(MAX_KEY + 1, "");
+    present.assign(MAX_KEY + 1, 0);
 
     keyLocks = (pthread_mutex_t *) malloc((MAX_KEY + 1) * sizeof(pthread_mutex_t));
     assert(keyLocks);
@@ -247,6 +253,10 @@ int main(int argc, char *argv[]) {
     }
 
     int numWorkers = atoi(argv[1]);
+    if (numWorkers <= 0) {
+        cout << "Error: Enter a positive integer as the number of worker threads\n";
+        return 1;
+    }
     auto workers = (pthread_t *) malloc(numWorkers * sizeof(pthread_t));
     assert(workers);
     for (int i = 0; i < numWorkers; i++) {
